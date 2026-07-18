@@ -63,3 +63,65 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`GIS Test server listening on port ${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/health`);
 });
+// ── Paste this block into your existing index.js, right after
+//    `const io = new Server(server, { ... });`
+//    (the block you already have with cors + maxHttpBufferSize).
+//
+// It adds:
+//   1. Room-based chat messaging (text + image, image as base64 data URI
+//      — this is exactly why you already set maxHttpBufferSize to 6MB)
+//   2. WebRTC signaling relay for voice/video calls (offer/answer/ICE)
+//
+// No new npm packages needed — this only uses socket.io, which you
+// already have installed.
+
+io.on("connection", (socket) => {
+  console.log("Client connected:", socket.id);
+
+  // ── Chat ────────────────────────────────────────────────────────
+  // Client joins a 1:1 (or group) room, e.g. roomId = sorted([userA, userB]).join('_')
+  socket.on("chat:join", ({ roomId }) => {
+    socket.join(roomId);
+  });
+
+  // payload: { roomId, type: "text" | "image", content, senderId, timestamp }
+  // For images, `content` is a base64 data URI (e.g. "data:image/jpeg;base64,...")
+  socket.on("chat:message", (payload) => {
+    io.to(payload.roomId).emit("chat:message", payload);
+  });
+
+  // ── Voice / video call signaling ──────────────────────────────────
+  // This server only relays SDP offers/answers and ICE candidates
+  // between the two peers in a room — actual audio/video travels
+  // peer-to-peer (or through a TURN server) once the call connects.
+
+  socket.on("call:invite", ({ roomId, from, callType }) => {
+    // callType: "voice" | "video"
+    socket.to(roomId).emit("call:invite", { from, callType });
+  });
+
+  socket.on("call:offer", ({ roomId, sdp, from, callType }) => {
+    socket.to(roomId).emit("call:offer", { sdp, from, callType });
+  });
+
+  socket.on("call:answer", ({ roomId, sdp, from }) => {
+    socket.to(roomId).emit("call:answer", { sdp, from });
+  });
+
+  socket.on("call:ice-candidate", ({ roomId, candidate, from }) => {
+    socket.to(roomId).emit("call:ice-candidate", { candidate, from });
+  });
+
+  socket.on("call:reject", ({ roomId }) => {
+    socket.to(roomId).emit("call:reject");
+  });
+
+  socket.on("call:end", ({ roomId }) => {
+    socket.to(roomId).emit("call:end");
+  });
+
+  socket.on("disconnect", () => {
+    console.log("Client disconnected:", socket.id);
+  });
+});
+
