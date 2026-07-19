@@ -89,28 +89,43 @@ io.on('connection', (socket) => {
     socket.emit('room history', { roomId, history: room.history });
   });
 
-  socket.on('chat message', (msg) => {
-    if (!msg || typeof msg !== 'object') return;
+  socket.on('chat message', (msg, ack) => {
+    // `ack` is the optional callback the client passes to socket.emit —
+    // we ALWAYS call it (success or failure) so the client can tell
+    // whether the message actually made it, instead of guessing.
+    const fail = (error) => {
+      console.log(`[chat message] rejected from ${socket.id}: ${error}`);
+      if (typeof ack === 'function') ack({ ok: false, error });
+    };
+
+    if (!msg || typeof msg !== 'object') return fail('invalid payload');
     const roomId = typeof msg.roomId === 'string' && rooms[msg.roomId] ? msg.roomId : 'general';
     const room = rooms[roomId];
-    if (room.members !== null && !room.members.includes(socket.data.phone)) return; // not a member
+    if (room.members !== null && !room.members.includes(socket.data.phone)) {
+      return fail('not a member of this room');
+    }
 
     const hasText = typeof msg.text === 'string' && msg.text.trim().length > 0;
     const hasImage = typeof msg.image === 'string' && msg.image.length > 0;
     const hasFile = typeof msg.fileData === 'string' && msg.fileData.length > 0;
-    if (!hasText && !hasImage && !hasFile) return;
+    const hasAudio = typeof msg.audioData === 'string' && msg.audioData.length > 0;
+    if (!hasText && !hasImage && !hasFile && !hasAudio) return fail('empty message');
 
-    const image = hasImage && msg.image.length <= 20 * 1024 * 1024 ? msg.image : undefined;
-    const fileData = hasFile && msg.fileData.length <= 20 * 1024 * 1024 ? msg.fileData : undefined;
+    if (hasImage && msg.image.length > 20 * 1024 * 1024) return fail('image too large');
+    if (hasFile && msg.fileData.length > 20 * 1024 * 1024) return fail('file too large');
+    if (hasAudio && msg.audioData.length > 15 * 1024 * 1024) return fail('audio too large');
 
     const fullMsg = {
       id: `${socket.id}-${Date.now()}`,
       roomId,
       text: hasText ? msg.text.trim().slice(0, 2000) : '',
-      image,
-      fileData,
-      fileName: fileData ? String(msg.fileName || 'file').slice(0, 100) : undefined,
-      fileMime: fileData ? String(msg.fileMime || 'application/octet-stream').slice(0, 100) : undefined,
+      image: hasImage ? msg.image : undefined,
+      fileData: hasFile ? msg.fileData : undefined,
+      fileName: hasFile ? String(msg.fileName || 'file').slice(0, 100) : undefined,
+      fileMime: hasFile ? String(msg.fileMime || 'application/octet-stream').slice(0, 100) : undefined,
+      audioData: hasAudio ? msg.audioData : undefined,
+      audioMime: hasAudio ? String(msg.audioMime || 'audio/m4a').slice(0, 100) : undefined,
+      audioDuration: hasAudio ? Number(msg.audioDuration) || 0 : undefined,
       sender: typeof msg.sender === 'string' ? msg.sender.slice(0, 40) : 'Anonymous',
       senderName: typeof msg.senderName === 'string' ? msg.senderName.slice(0, 40) : '',
       timestamp: Date.now(),
@@ -120,6 +135,7 @@ io.on('connection', (socket) => {
     if (room.history.length > MAX_HISTORY) room.history.shift();
 
     io.to(roomId).emit('chat message', fullMsg);
+    if (typeof ack === 'function') ack({ ok: true, id: fullMsg.id });
   });
 
   socket.on('disconnect', (reason) => {
