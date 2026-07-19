@@ -1,4 +1,4 @@
-// GIS Test — Chat Server (with rooms/groups + file support)
+// GIS Test — Chat Server (rooms with membership + larger file support)
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
@@ -11,22 +11,38 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
-  maxHttpBufferSize: 8 * 1024 * 1024, // 8MB — headroom for files/images
+  maxHttpBufferSize: 22 * 1024 * 1024, // ~22MB — enough for base64'd ~15MB files
 });
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', connections: io.engine.clientsCount });
 });
 
-const MAX_HISTORY = 80; // lower since messages can carry big attachments
+const MAX_HISTORY = 60;
 
-// rooms: { [roomId]: { id, name, createdBy, history: [] } }
+// rooms: { [roomId]: { id, name, createdBy, members: [phone,...], history: [] } }
 const rooms = {
-  general: { id: 'general', name: 'ទូទៅ (General)', createdBy: null, history: [] },
+  general: { id: 'general', name: 'ទូទៅ (General)', createdBy: null, members: null, history: [] },
 };
+// members === null means "public / open to everyone"
 
-function roomListPayload() {
-  return Object.values(rooms).map((r) => ({ id: r.id, name: r.name }));
+function normalizePhone(p) {
+  return String(p || '').replace(/[\s-]/g, '').replace(/^\+/, '').replace(/^855/, '').replace(/^0/, '');
+}
+
+function roomsVisibleTo(phone) {
+  const norm = normalizePhone(phone);
+  return Object.values(rooms)
+    .filter((r) => r.members === null || r.members.includes(norm))
+    .map((r) => ({ id: r.id, name: r.name }));
+}
+
+function broadcastRoomListToAll() {
+  for (const [, socket] of io.sockets.sockets) {
+    if (socket.data.phone) {
+      socket.emit('room list', roomsVisibleTo(socket.data.phone));
+    }
+  }
 }
 
 function makeRoomId() {
@@ -36,17 +52,28 @@ function makeRoomId() {
 io.on('connection', (socket) => {
   console.log(`[connect] ${socket.id} (${io.engine.clientsCount} online)`);
 
-  // Everyone auto-joins "general" on connect
   socket.join('general');
-  socket.emit('room list', roomListPayload());
   socket.emit('room history', { roomId: 'general', history: rooms.general.history });
 
-  socket.on('create room', (name) => {
+  socket.on('identify', ({ phone }) => {
+    socket.data.phone = normalizePhone(phone);
+    // re-join any custom rooms this phone already belongs to
+    Object.values(rooms).forEach((r) => {
+      if (r.members && r.members.includes(socket.data.phone)) socket.join(r.id);
+    });
+    socket.emit('room list', roomsVisibleTo(socket.data.phone));
+  });
+
+  socket.on('create room', ({ name, memberPhones }) => {
     if (typeof name !== 'string' || !name.trim()) return;
     const id = makeRoomId();
-    rooms[id] = { id, name: name.trim().slice(0, 40), createdBy: socket.id, history: [] };
+    const creatorPhone = socket.data.phone;
+    const invitees = Array.isArray(memberPhones) ? memberPhones.map(normalizePhone).filter(Boolean) : [];
+    const members = creatorPhone ? Array.from(new Set([creatorPhone, ...invitees])) : null;
+
+    rooms[id] = { id, name: name.trim().slice(0, 40), createdBy: socket.id, members, history: [] };
     socket.join(id);
-    io.emit('room list', roomListPayload()); // let everyone see the new group
+    broadcastRoomListToAll();
     socket.emit('room history', { roomId: id, history: [] });
     socket.emit('room created', { id, name: rooms[id].name });
   });
@@ -54,6 +81,10 @@ io.on('connection', (socket) => {
   socket.on('join room', (roomId) => {
     const room = rooms[roomId];
     if (!room) return;
+    if (room.members !== null && !room.members.includes(socket.data.phone)) {
+      socket.emit('join denied', { roomId });
+      return;
+    }
     socket.join(roomId);
     socket.emit('room history', { roomId, history: room.history });
   });
@@ -61,14 +92,16 @@ io.on('connection', (socket) => {
   socket.on('chat message', (msg) => {
     if (!msg || typeof msg !== 'object') return;
     const roomId = typeof msg.roomId === 'string' && rooms[msg.roomId] ? msg.roomId : 'general';
+    const room = rooms[roomId];
+    if (room.members !== null && !room.members.includes(socket.data.phone)) return; // not a member
 
     const hasText = typeof msg.text === 'string' && msg.text.trim().length > 0;
     const hasImage = typeof msg.image === 'string' && msg.image.length > 0;
     const hasFile = typeof msg.fileData === 'string' && msg.fileData.length > 0;
     if (!hasText && !hasImage && !hasFile) return;
 
-    const image = hasImage && msg.image.length <= 8 * 1024 * 1024 ? msg.image : undefined;
-    const fileData = hasFile && msg.fileData.length <= 8 * 1024 * 1024 ? msg.fileData : undefined;
+    const image = hasImage && msg.image.length <= 20 * 1024 * 1024 ? msg.image : undefined;
+    const fileData = hasFile && msg.fileData.length <= 20 * 1024 * 1024 ? msg.fileData : undefined;
 
     const fullMsg = {
       id: `${socket.id}-${Date.now()}`,
@@ -83,8 +116,8 @@ io.on('connection', (socket) => {
       timestamp: Date.now(),
     };
 
-    rooms[roomId].history.push(fullMsg);
-    if (rooms[roomId].history.length > MAX_HISTORY) rooms[roomId].history.shift();
+    room.history.push(fullMsg);
+    if (room.history.length > MAX_HISTORY) room.history.shift();
 
     io.to(roomId).emit('chat message', fullMsg);
   });
