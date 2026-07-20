@@ -1,7 +1,9 @@
-// GIS Test — Chat Server (rooms with membership + larger file support)
+// GIS Chat — Chat Server (rooms with membership + larger file support)
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
 const { Server } = require('socket.io');
 
 const app = express();
@@ -11,7 +13,7 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
-  maxHttpBufferSize: 22 * 1024 * 1024, // ~22MB — enough for base64'd ~15MB files
+  maxHttpBufferSize: 90 * 1024 * 1024, // ~90MB — enough for a base64'd ~50MB file
 });
 
 app.get('/health', (req, res) => {
@@ -20,10 +22,41 @@ app.get('/health', (req, res) => {
 
 const MAX_HISTORY = 60;
 
-// rooms: { [roomId]: { id, name, createdBy, members: [phone,...], history: [] } }
-const rooms = {
-  general: { id: 'general', name: 'ទូទៅ (General)', createdBy: null, members: null, history: [] },
-};
+// ── Persistence ────────────────────────────────────────────────────
+// Render's free tier "spins down" the server after inactivity and
+// restarts it on the next request — that wipes anything kept only in
+// memory. We save rooms/messages to a JSON file on disk so a spin-down
+// / spin-up cycle doesn't lose your groups and chat history.
+// (Note: a full redeploy — pushing new code — still resets the disk,
+// since Render's free web services don't have a persistent volume.
+// For data that must survive redeploys too, you'd need a real database
+// like Render's free Postgres or MongoDB Atlas.)
+const DATA_FILE = path.join(__dirname, 'data.json');
+
+function loadRooms() {
+  try {
+    const raw = fs.readFileSync(DATA_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') return parsed;
+  } catch (e) {
+    // no saved file yet, or it's corrupted — start fresh
+  }
+  return {}; // no default/public room — users only see groups they were explicitly added to
+}
+
+let saveTimer = null;
+function saveRoomsSoon() {
+  // Debounced so a burst of messages doesn't hammer the disk with writes.
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    fs.writeFile(DATA_FILE, JSON.stringify(rooms), (err) => {
+      if (err) console.error('[persist] failed to save data.json:', err.message);
+    });
+  }, 1000);
+}
+
+// rooms: { [roomId]: { id, name, createdBy, members: [phone,...], history: [], lastActivityAt } }
+const rooms = loadRooms();
 // members === null means "public / open to everyone"
 
 function normalizePhone(p) {
@@ -34,7 +67,7 @@ function roomsVisibleTo(phone) {
   const norm = normalizePhone(phone);
   return Object.values(rooms)
     .filter((r) => r.members === null || r.members.includes(norm))
-    .map((r) => ({ id: r.id, name: r.name }));
+    .map((r) => ({ id: r.id, name: r.name, lastActivityAt: r.lastActivityAt || 0 }));
 }
 
 function broadcastRoomListToAll() {
@@ -51,9 +84,8 @@ function makeRoomId() {
 
 io.on('connection', (socket) => {
   console.log(`[connect] ${socket.id} (${io.engine.clientsCount} online)`);
-
-  socket.join('general');
-  socket.emit('room history', { roomId: 'general', history: rooms.general.history });
+  // No auto-join here on purpose — a user only sees/joins rooms they're
+  // an explicit member of. That list is sent once `identify` fires below.
 
   socket.on('identify', ({ phone }) => {
     socket.data.phone = normalizePhone(phone);
@@ -71,11 +103,12 @@ io.on('connection', (socket) => {
     const invitees = Array.isArray(memberPhones) ? memberPhones.map(normalizePhone).filter(Boolean) : [];
     const members = creatorPhone ? Array.from(new Set([creatorPhone, ...invitees])) : null;
 
-    rooms[id] = { id, name: name.trim().slice(0, 40), createdBy: socket.id, members, history: [] };
+    rooms[id] = { id, name: name.trim().slice(0, 40), createdBy: socket.id, members, history: [], lastActivityAt: Date.now() };
     socket.join(id);
     broadcastRoomListToAll();
     socket.emit('room history', { roomId: id, history: [] });
     socket.emit('room created', { id, name: rooms[id].name });
+    saveRoomsSoon();
   });
 
   socket.on('join room', (roomId) => {
@@ -111,9 +144,9 @@ io.on('connection', (socket) => {
     const hasAudio = typeof msg.audioData === 'string' && msg.audioData.length > 0;
     if (!hasText && !hasImage && !hasFile && !hasAudio) return fail('empty message');
 
-    if (hasImage && msg.image.length > 20 * 1024 * 1024) return fail('image too large');
-    if (hasFile && msg.fileData.length > 20 * 1024 * 1024) return fail('file too large');
-    if (hasAudio && msg.audioData.length > 15 * 1024 * 1024) return fail('audio too large');
+    if (hasImage && msg.image.length > 25 * 1024 * 1024) return fail('image too large');
+    if (hasFile && msg.fileData.length > 70 * 1024 * 1024) return fail('file too large');
+    if (hasAudio && msg.audioData.length > 20 * 1024 * 1024) return fail('audio too large');
 
     const fullMsg = {
       id: `${socket.id}-${Date.now()}`,
@@ -133,9 +166,12 @@ io.on('connection', (socket) => {
 
     room.history.push(fullMsg);
     if (room.history.length > MAX_HISTORY) room.history.shift();
+    room.lastActivityAt = fullMsg.timestamp;
 
     io.to(roomId).emit('chat message', fullMsg);
     if (typeof ack === 'function') ack({ ok: true, id: fullMsg.id });
+    broadcastRoomListToAll();
+    saveRoomsSoon();
   });
 
   socket.on('disconnect', (reason) => {
@@ -145,6 +181,6 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`GIS Test server listening on port ${PORT}`);
+  console.log(`GIS Chat server listening on port ${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/health`);
 });
