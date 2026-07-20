@@ -177,6 +177,34 @@ io.on('connection', (socket) => {
   socket.on('disconnect', (reason) => {
     console.log(`[disconnect] ${socket.id} (${reason})`);
   });
+
+  // ── Voice / video call signaling ────────────────────────────────
+  // This server only relays SDP offers/answers and ICE candidates between
+  // the two peers in a room — actual audio/video travels directly between
+  // the two phones (or via STUN/TURN) once the call connects.
+  socket.on('call:invite', ({ roomId, from, callType }) => {
+    socket.to(roomId).emit('call:invite', { roomId, from, callType });
+  });
+
+  socket.on('call:offer', ({ roomId, sdp }) => {
+    socket.to(roomId).emit('call:offer', { roomId, sdp });
+  });
+
+  socket.on('call:answer', ({ roomId, sdp }) => {
+    socket.to(roomId).emit('call:answer', { roomId, sdp });
+  });
+
+  socket.on('call:ice-candidate', ({ roomId, candidate }) => {
+    socket.to(roomId).emit('call:ice-candidate', { roomId, candidate });
+  });
+
+  socket.on('call:reject', ({ roomId }) => {
+    socket.to(roomId).emit('call:reject', { roomId });
+  });
+
+  socket.on('call:end', ({ roomId }) => {
+    socket.to(roomId).emit('call:end', { roomId });
+  });
 });
 
 const PORT = process.env.PORT || 3001;
