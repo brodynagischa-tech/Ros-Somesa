@@ -1,25 +1,4 @@
-name: Site Check
-
-on:
-  schedule:
-    - cron: '0 1 * * *'
-  workflow_dispatch: {}
-
-jobs:
-  check-sites:
-    runs-on: ubuntu-latest
-    timeout-minutes: 180
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        run: pip install telethon gspread google-auth
-
-      - name: Run site check
+- name: Run site check
         env:
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
@@ -28,5 +7,19 @@ jobs:
           BOT_USERNAME: ${{ secrets.BOT_USERNAME }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
         run: |
-          export GOOGLE_CREDS_B64=$(python -c 'import os, json, base64; d=json.loads(os.environ["GCP_SA_KEY"]); d["private_key"]=d["private_key"].replace("\\n", "\n"); print(base64.b64encode(json.dumps(d).encode()).decode())')
-          python check_sites.py
+          python -c '
+          import os, json, base64
+          raw_key = os.environ["GCP_SA_KEY"]
+          try:
+              d = json.loads(raw_key)
+          except Exception:
+              # បើទម្រង់មានបញ្ហា double escape
+              d = json.loads(raw_key.encode().decode("unicode-escape"))
+          
+          if "private_key" in d:
+              d["private_key"] = d["private_key"].replace("\\n", "\n")
+              
+          os.environ["GOOGLE_CREDS_B64"] = base64.b64encode(json.dumps(d).encode()).decode()
+          import subprocess
+          subprocess.run(["python", "check_sites.py"])
+          '
