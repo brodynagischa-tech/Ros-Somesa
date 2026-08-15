@@ -29,6 +29,7 @@ CHECK_COMMAND = "/bts"
 SHEET_QUEUE = "Queue"
 SHEET_OFFLINE = "OfflineSites"
 NO_DATA_TEXT = "No data available"
+CHECKING_TEXT = "Checking system"  # សារបណ្តោះអាសន្នពី Bot B មុននឹងឆ្លើយចម្លើយពិត - ត្រូវរំលងវាចោល
 REPLY_TIMEOUT_SEC = 150    # រង់ចាំចម្លើយប៉ុន្មានវិនាទីមុននឹងចាត់ទុកថាគ្មានចម្លើយ (Bot B អាចយឺត ១-២ នាទី ព្រោះមានគេសួរដែរក្នុងគ្រុប)
 POLL_INTERVAL_SEC = 5      # ញែកមើលចម្លើយរៀងរាល់ប៉ុន្មានវិនាទី
 DELAY_BETWEEN_SITES_SEC = 4  # ចន្លោះពេលរវាងសំណួរនីមួយៗ ដើម្បីជៀសវាងការរឹតត្បិតរបស់ Telegram
@@ -71,12 +72,16 @@ def load_queue(sh):
 # ============================================================
 def wait_for_reply(client, entity, sent_message):
     """ត្រួតពិនិត្យរកមើលសារថ្មីដែលចូលមកបន្ទាប់ពីសារយើងផ្ញើ (min_id) រហូតដល់ REPLY_TIMEOUT_SEC។
-    ដោយសារនេះជាឆាតឯកជនមានតែយើងនិង Bot B ២នាក់ សារថ្មីណាមួយចូលមកក្រោយ ត្រូវតែជាចម្លើយពី Bot B។"""
+    រំលងសារបណ្តោះអាសន្ន "Checking system..." ចោល រង់ចាំចម្លើយពិតប្រាកដទើបចាត់ទុកជាបញ្ចប់។"""
     deadline = time.time() + REPLY_TIMEOUT_SEC
     while time.time() < deadline:
         for m in client.get_messages(entity, min_id=sent_message.id, limit=10):
-            if not m.out:  # សារចូល (មិនមែនសារយើងផ្ញើ)
-                return m.text or ""
+            if m.out:
+                continue  # សារយើងផ្ញើផ្ទាល់ - រំលង
+            text = m.text or ""
+            if CHECKING_TEXT in text:
+                continue  # សារបណ្តោះអាសន្ន - នៅតែត្រូវរង់ចាំចម្លើយពិត
+            return text
         time.sleep(POLL_INTERVAL_SEC)
     return None
 
