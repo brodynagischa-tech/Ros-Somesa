@@ -43,10 +43,17 @@ DELAY_BETWEEN_SITES_SEC = (
 # ============================================================
 def get_spreadsheet():
   creds_raw = os.environ["GCP_SA_KEY"]
-  # ដោះស្រាយបញ្ហា private_key ពេលមាន \n
-  creds_dict = json.loads(creds_raw)
+
+  # ព្យាយាម Parse JSON និងជួសជុលសញ្ញា private_key newline ឡើងវិញដោយស្វ័យប្រវត្តិ
+  try:
+    creds_dict = json.loads(creds_raw)
+  except json.JSONDecodeError:
+    creds_dict = json.loads(creds_raw.encode().decode("unicode-escape"))
+
   if "private_key" in creds_dict:
-    creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+    creds_dict["private_key"] = creds_dict["private_key"].replace(
+        "\\n", "\n"
+    )
 
   scopes = ["https://www.googleapis.com/auth/spreadsheets"]
   creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
