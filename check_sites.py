@@ -98,6 +98,11 @@ def main():
         print("Queue sheet ទទេ - សូម paste site code ចូលជួរឈរ A សិន (ចាប់ពីជួរដេកទី 2)")
         return
 
+    # សម្អាតលទ្ធផលពីលើកមុនចោល ដើម្បីចាប់ផ្តើមថ្ងៃថ្មីស្អាត (ជួរឈរ A ដែលមានកូដមិនប៉ះពាល់ទេ)
+    last_row = codes[-1][0]
+    queue_ws.batch_clear([f"B2:D{last_row}"])
+    offline_ws.batch_clear([f"A2:B{max(offline_ws.row_count, last_row)}"])
+
     online = offline = no_resp = 0
 
     with TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH) as client:
