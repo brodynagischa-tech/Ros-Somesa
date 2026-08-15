@@ -28,5 +28,5 @@ jobs:
           BOT_USERNAME: ${{ secrets.BOT_USERNAME }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
         run: |
-          export GOOGLE_CREDS_B64=$(echo -n "$GCP_SA_KEY" | base64 -w 0)
+          export GOOGLE_CREDS_B64=$(python -c 'import os, json, base64; d=json.loads(os.environ["GCP_SA_KEY"]); d["private_key"]=d["private_key"].replace("\\n", "\n"); print(base64.b64encode(json.dumps(d).encode()).decode())')
           python check_sites.py
