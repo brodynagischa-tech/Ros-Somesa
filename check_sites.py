@@ -30,7 +30,7 @@ SHEET_QUEUE = "Queue"
 SHEET_OFFLINE = "OfflineSites"
 NO_DATA_TEXT = "No data available"
 CHECKING_TEXT = "Checking system"  # សារបណ្តោះអាសន្នពី Bot B មុននឹងឆ្លើយចម្លើយពិត - ត្រូវរំលងវាចោល
-REPLY_TIMEOUT_SEC = 150    # រង់ចាំចម្លើយប៉ុន្មានវិនាទីមុននឹងចាត់ទុកថាគ្មានចម្លើយ (Bot B អាចយឺត ១-២ នាទី ព្រោះមានគេសួរដែរក្នុងគ្រុប)
+REPLY_TIMEOUT_SEC = 120    # រង់ចាំចម្លើយប៉ុន្មានវិនាទីមុននឹងចាត់ទុកថាគ្មានចម្លើយ (Bot B អាចយឺត ១-២ នាទី ព្រោះមានគេសួរដែរក្នុងគ្រុប)
 POLL_INTERVAL_SEC = 5      # ញែកមើលចម្លើយរៀងរាល់ប៉ុន្មានវិនាទី
 DELAY_BETWEEN_SITES_SEC = 4  # ចន្លោះពេលរវាងសំណួរនីមួយៗ ដើម្បីជៀសវាងការរឹតត្បិតរបស់ Telegram
 
