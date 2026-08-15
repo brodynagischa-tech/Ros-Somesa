@@ -26,6 +26,8 @@ SPREADSHEET_ID = os.environ["SPREADSHEET_ID"]
 GOOGLE_CREDS_JSON = os.environ["GCP_SA_KEY"]  # Service account JSON ទាំងមូល (គ្មាន encode)
 
 CHECK_COMMAND = "/bts"
+SHEET_QUEUE = "Queue"
+SHEET_OFFLINE = "OfflineSites"
 NO_DATA_TEXT = "No data available"
 REPLY_TIMEOUT_SEC = 20     # រង់ចាំចម្លើយប៉ុន្មានវិនាទីមុននឹងចាត់ទុកថាគ្មានចម្លើយ
 POLL_INTERVAL_SEC = 2      # ញែកមើលចម្លើយរៀងរាល់ប៉ុន្មានវិនាទី
