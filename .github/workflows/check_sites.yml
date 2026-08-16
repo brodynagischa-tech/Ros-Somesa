@@ -35,3 +35,4 @@ jobs:
           BOT_USERNAME: ${{ secrets.BOT_USERNAME }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          NOTIFY_GROUP_ID: ${{ secrets.NOTIFY_GROUP_ID }}
