@@ -34,10 +34,10 @@ SHEET_OFFLINE = "OfflineSites"
 SHEET_OWNERS = "SiteOwners"
 NO_FAULT_TEXT = "No data available"  # មានន័យថាគ្មាន fault ត្រូវបានរកឃើញ - site កំពុង Online
 CHECKING_TEXT = "Checking system"  # សារបណ្តោះអាសន្នពី Bot B មុននឹងឆ្លើយចម្លើយពិត - ត្រូវរំលងវាចោល
-REPLY_TIMEOUT_SEC = 120    # រង់ចាំចម្លើយប៉ុន្មានវិនាទីមុននឹងចាត់ទុកថាគ្មានចម្លើយ (Bot B អាចយឺត ១-២ នាទី ព្រោះមានគេសួរដែរក្នុងគ្រុប)
-POLL_INTERVAL_SEC = 4      # ញែកមើលចម្លើយរៀងរាល់ប៉ុន្មានវិនាទី
+REPLY_TIMEOUT_SEC = 150    # រង់ចាំចម្លើយប៉ុន្មានវិនាទីមុននឹងចាត់ទុកថាគ្មានចម្លើយ (Bot B អាចយឺត ១-២ នាទី ព្រោះមានគេសួរដែរក្នុងគ្រុប)
+POLL_INTERVAL_SEC = 5      # ញែកមើលចម្លើយរៀងរាល់ប៉ុន្មានវិនាទី
 DELAY_BETWEEN_SITES_SEC = 10  # ចន្លោះពេលមូលដ្ឋានរវាងសំណួរនីមួយៗ (បន្ថែម jitter ចៃដន្យទៀត ដើម្បីកុំឲ្យមើលទៅដូច bot ពេក)
-DELAY_JITTER_SEC = 4          # បន្ថែមចន្លោះចៃដន្យ 0-5 វិនាទីទៀតលើ delay មូលដ្ឋាន
+DELAY_JITTER_SEC = 5          # បន្ថែមចន្លោះចៃដន្យ 0-5 វិនាទីទៀតលើ delay មូលដ្ឋាន
 
 
 # ============================================================
@@ -48,7 +48,17 @@ def get_spreadsheet():
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
     gc = gspread.authorize(creds)
-    return gc.open_by_key(SPREADSHEET_ID)
+
+    last_error = None
+    for attempt in range(5):
+        try:
+            return gc.open_by_key(SPREADSHEET_ID)
+        except gspread.exceptions.APIError as e:
+            last_error = e
+            wait_sec = 5 * (attempt + 1)
+            print(f"Google Sheets API error (សាកល្បងទី {attempt + 1}/5) - រង់ចាំ {wait_sec}s: {e}")
+            time.sleep(wait_sec)
+    raise last_error
 
 
 def get_or_create_worksheet(sh, title, header):
