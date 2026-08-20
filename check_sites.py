@@ -34,10 +34,10 @@ SHEET_OFFLINE = "OfflineSites"
 SHEET_OWNERS = "SiteOwners"
 NO_FAULT_TEXT = "No data available"  # មានន័យថាគ្មាន fault ត្រូវបានរកឃើញ - site កំពុង Online
 CHECKING_TEXT = "Checking system"  # សារបណ្តោះអាសន្នពី Bot B មុននឹងឆ្លើយចម្លើយពិត - ត្រូវរំលងវាចោល
-REPLY_TIMEOUT_SEC = 120    # រង់ចាំចម្លើយប៉ុន្មានវិនាទីមុននឹងចាត់ទុកថាគ្មានចម្លើយ (Bot B អាចយឺត ១-២ នាទី ព្រោះមានគេសួរដែរក្នុងគ្រុប)
+REPLY_TIMEOUT_SEC = 100    # រង់ចាំចម្លើយប៉ុន្មានវិនាទីមុននឹងចាត់ទុកថាគ្មានចម្លើយ (Bot B អាចយឺត ១-២ នាទី ព្រោះមានគេសួរដែរក្នុងគ្រុប)
 POLL_INTERVAL_SEC = 3      # ញែកមើលចម្លើយរៀងរាល់ប៉ុន្មានវិនាទី
-DELAY_BETWEEN_SITES_SEC = 7  # ចន្លោះពេលមូលដ្ឋានរវាងសំណួរនីមួយៗ (បន្ថែម jitter ចៃដន្យទៀត ដើម្បីកុំឲ្យមើលទៅដូច bot ពេក)
-DELAY_JITTER_SEC = 3          # បន្ថែមចន្លោះចៃដន្យ 0-5 វិនាទីទៀតលើ delay មូលដ្ឋាន
+DELAY_BETWEEN_SITES_SEC = 6  # ចន្លោះពេលមូលដ្ឋានរវាងសំណួរនីមួយៗ (បន្ថែម jitter ចៃដន្យទៀត ដើម្បីកុំឲ្យមើលទៅដូច bot ពេក)
+DELAY_JITTER_SEC = 3         # បន្ថែមចន្លោះចៃដន្យ 0-5 វិនាទីទៀតលើ delay មូលដ្ឋាន
 
 
 # ============================================================
@@ -101,18 +101,49 @@ def load_owners(sh):
 # ============================================================
 # Telegram helpers
 # ============================================================
+def safe_append(ws, row, retries=5):
+    """append_row() ជាមួយ retry - បើបរាជ័យគ្រប់ដងអស់ គ្រាន់តែ print warning ហើយបន្តទៅមុខ"""
+    for attempt in range(retries):
+        try:
+            ws.append_row(row)
+            return True
+        except gspread.exceptions.APIError as e:
+            wait_sec = 5 * (attempt + 1)
+            print(f"Sheets append error (សាកល្បងទី {attempt + 1}/{retries}) - រង់ចាំ {wait_sec}s: {e}")
+            time.sleep(wait_sec)
+    print(f"Sheets append បរាជ័យទាំងស្រុងសម្រាប់ {row} - រំលងហើយបន្តទៅ site បន្ទាប់")
+    return False
+
+
+def safe_update(ws, range_name, values, retries=5):
+    """update() ជាមួយ retry - បើបរាជ័យគ្រប់ដងអស់ គ្រាន់តែ print warning ហើយបន្តទៅមុខ មិនគាំង script ទាំងមូលទេ"""
+    for attempt in range(retries):
+        try:
+            ws.update(range_name=range_name, values=values)
+            return True
+        except gspread.exceptions.APIError as e:
+            wait_sec = 5 * (attempt + 1)
+            print(f"Sheets update error (សាកល្បងទី {attempt + 1}/{retries}) - រង់ចាំ {wait_sec}s: {e}")
+            time.sleep(wait_sec)
+    print(f"Sheets update បរាជ័យទាំងស្រុងសម្រាប់ {range_name} - រំលងហើយបន្តទៅ site បន្ទាប់")
+    return False
+
+
 def wait_for_reply(client, entity, sent_message):
     """ត្រួតពិនិត្យរកមើលសារថ្មីដែលចូលមកបន្ទាប់ពីសារយើងផ្ញើ (min_id) រហូតដល់ REPLY_TIMEOUT_SEC។
     រំលងសារបណ្តោះអាសន្ន "Checking system..." ចោល រង់ចាំចម្លើយពិតប្រាកដទើបចាត់ទុកជាបញ្ចប់។"""
     deadline = time.time() + REPLY_TIMEOUT_SEC
     while time.time() < deadline:
-        for m in client.get_messages(entity, min_id=sent_message.id, limit=10):
-            if m.out:
-                continue  # សារយើងផ្ញើផ្ទាល់ - រំលង
-            text = m.text or ""
-            if CHECKING_TEXT in text:
-                continue  # សារបណ្តោះអាសន្ន - នៅតែត្រូវរង់ចាំចម្លើយពិត
-            return text
+        try:
+            for m in client.get_messages(entity, min_id=sent_message.id, limit=10):
+                if m.out:
+                    continue
+                text = m.text or ""
+                if CHECKING_TEXT in text:
+                    continue
+                return text
+        except Exception as e:
+            print(f"wait_for_reply ជួប error បណ្តោះអាសន្ន (បន្តរង់ចាំ): {e}")
         time.sleep(POLL_INTERVAL_SEC)
     return None
 
@@ -138,6 +169,7 @@ def main():
     online = offline = no_resp = 0
 
     with TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH) as client:
+        client.get_dialogs()  # ទាញយកបញ្ជីក្រុម/ឆាតទាំងអស់ជាមុន ដើម្បីអោយ entity cache ស្គាល់ Chat ID គ្រប់ក្រុម
         entity = client.get_entity(BOT_USERNAME)
 
         for row_num, code in codes:
@@ -149,7 +181,7 @@ def main():
                 if reply_text is None:
                     result = "NoResponse"
                     no_resp += 1
-                    offline_ws.append_row([code, "NoResponse", now])
+                    safe_append(offline_ws, [code, "NoResponse", now])
                 elif NO_FAULT_TEXT.lower() in reply_text.lower():
                     result = "Online"
                     online += 1
@@ -158,7 +190,7 @@ def main():
                     result = "Offline"
                     offline += 1
                     reason = reply_text.strip()[:200]
-                    offline_ws.append_row([code, reason, now])
+                    safe_append(offline_ws, [code, reason, now])
 
                     mether, staff = owners.get(code, ("", ""))
                     notify_lines = [f"⚠️ Site {code} Offline", f"មូលហេតុ: {reason}"]
@@ -168,21 +200,21 @@ def main():
                         notify_lines.append(f"បុគ្គលិកគ្រប់គ្រង: {staff}")
                     client.send_message(NOTIFY_GROUP_ID, "\n".join(notify_lines))
 
-                queue_ws.update(range_name=f"B{row_num}:D{row_num}", values=[["Done", result, now]])
+                safe_update(queue_ws, f"B{row_num}:D{row_num}", [["Done", result, now]])
                 print(f"{code}: {result}")
 
             except FloodWaitError as e:
                 # Telegram ប្រាប់ថាយើងសួរញឹកញាប់ពេក - ត្រូវរង់ចាំតាមចំនួនវិនាទីដែលវាកំណត់ រួចសាកល្បង site នេះម្តងទៀត
                 wait_sec = e.seconds + 5
                 print(f"{code}: FloodWait - រង់ចាំ {wait_sec} វិនាទី")
-                queue_ws.update(range_name=f"B{row_num}:D{row_num}", values=[["Error", f"FloodWait {e.seconds}s", datetime.now().isoformat()]])
+                safe_update(queue_ws, f"B{row_num}:D{row_num}", [["Error", f"FloodWait {e.seconds}s", datetime.now().isoformat()]])
                 time.sleep(wait_sec)
                 continue
 
             except Exception as e:
                 # error ផ្សេងទៀតពី Bot B (ឬបញ្ហា network) - កត់ត្រាទុក ហើយបន្តទៅ site បន្ទាប់ មិនបញ្ឈប់ទាំង run ទេ
                 print(f"{code}: Error - {e}")
-                queue_ws.update(range_name=f"B{row_num}:D{row_num}", values=[["Error", str(e)[:200], datetime.now().isoformat()]])
+                safe_update(queue_ws, f"B{row_num}:D{row_num}", [["Error", str(e)[:200], datetime.now().isoformat()]])
 
             time.sleep(DELAY_BETWEEN_SITES_SEC + random.uniform(0, DELAY_JITTER_SEC))
 
